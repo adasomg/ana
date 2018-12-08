@@ -1,4 +1,6 @@
 # adas.ana
+[![Clojars](https://img.shields.io/clojars/v/adas/ana.svg)](https://clojars.org/adas/ana)
+
 Ana is a collection of general purpose macros with a focus on writing succint code. 
 They are divided into 2 broad categories "anaphoric", and "quick".
 While the anaphoras are inspired by the traditional lisp kind, popularized by Paul Graham's "On Lisp", they go much further.
@@ -6,16 +8,27 @@ Most importantly the problem of nesting is solved by "letter doubling" and using
 
 The "quick" macros are simply other general purpose macros which aren't anaphoric.
 
-The library is VERY MUCH WORK IN PROGRESS, things will break.
+The library is VERY MUCH WORK IN PROGRESS, things will break. Note that as of right now the symbols are replaced by copying in the expression it references, not by binding to a common variable. Hence not suitable for using with expressions that cause side-effects or involve a lot of computation. That will be changed soon.
 
 If you have suggestions or existing macros that you think fit here please  submit an issue or a PR.
 Anything that enables writing succint code and expands to resonable code is fair game. 
 Resonable meaning that the resultant code is similar to that which you'd write by hand, runtime penalties should be avoided.
 
+# require
+```clojure
+;; clojure - in your (ns ...) form
+(:require [adas.ana :refer :all])
+;; clojure or
+(require '[adas.ana :refer :all]])
+;; clojurescript - in your (ns ...) form
+(:require-macros '[adas.ana :refer [qmap qstr acond aif awhen af aand aor]])
+```
+
 # a[naphoric] macros
 
 ## acond
 ```clojure
+;; => indicates what the macro expands to roughly
 (acond (+ 5 2) %test) ; => (cond (+ 5 2) (+ 5 2))
 (acond (+ 5 2) %t) ; => (cond (+ 5 2) (+ 5 2))
 (acond (+ 5 2) (acond 9 (+ %t %tt))) ; => (cond (+ 5 2) (cond 9 (+ 9 (+ 5 2))))
