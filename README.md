@@ -1,7 +1,7 @@
-# adas.ana
+# adas.ana - Clojure[Script] macros for productivity like you've never seen before 
 [![Clojars](https://img.shields.io/clojars/v/adas/ana.svg)](https://clojars.org/adas/ana)
 
-Ana is a collection of general purpose macros with a focus on writing succint code. 
+adas.ana is a collection of general purpose macros with a focus on writing succint code. 
 They are divided into 2 broad categories "anaphoric", and "quick".
 While the anaphoras are inspired by the traditional lisp kind, popularized by Paul Graham's "On Lisp", they go much further.
 Most importantly the problem of nesting is solved by "letter doubling" and using context appropriate symbols instead of following the `it` tradition as you'll see in examples.
