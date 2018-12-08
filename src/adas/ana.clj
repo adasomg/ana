@@ -70,7 +70,6 @@
                 (re-find (re-pattern (qstr "^\\%[te]{~(+ 1 depth)}(est|hen|lse)?")) (name x))
                 (let [g (gensym)
                       [_ m] (re-find (re-pattern (qstr "^\\%[te]{~(+ 1 depth)}(est|hen|lse)?")) (name x))]
-                  (println m)
                   (case m
                     "est" (swap! replaces assoc g test)
                     nil (swap! replaces assoc g test)
@@ -126,7 +125,6 @@
 (defmacro ^{::anaphorizes acond-anaphorizes} acond [& body]
   (let [replaces (atom {})]
     (letfn [(walker [form [test then :as cond-form] depth ana-depth x]
-              (println (qmap depth ana-depth x form cond-form))
               (cond
                 (and (coll? x) (list? x) (->> x first resolve meta ::anaphorizes (difference acond-anaphorizes) empty?))
                 (walk/walk (partial walker form (if (= depth 0)
@@ -139,10 +137,11 @@
 
                 (not (symbol? x)) x
 
-                (re-find (re-pattern (qstr "^\\%[te]{~(+ 1 ana-depth)}(est)")) (name x))
+                (re-find (re-pattern (qstr "^\\%[te]{~(+ 1 ana-depth)}(est)?")) (name x))
                 (let [g (gensym)
-                      [_ m] (re-find (re-pattern (qstr "^\\%[te]{~(+ 1 ana-depth)}(est)")) (name x))]
+                      [_ m] (re-find (re-pattern (qstr "^\\%[te]{~(+ 1 ana-depth)}(est)?")) (name x))]
                   (case m
+                    nil (swap! replaces assoc g test)
                     "est" (swap! replaces assoc g test))
                   g)
                 :else x))]
