@@ -45,18 +45,17 @@ see [aif](#aif)
 
 ## af
 ```clojure
-;; for af the => comment indicates the eval result instead, as the expansion is less obvious
+;; for af examples the => comment indicates the eval result instead, as the expansion is less obvious
 ((af [%1 %2]) 10 20) ; => [10 20]
 ((af [%:lol]) {:lol 20}) ; => [20]
 ((af [%1 %2:lol]) 10 {:lol 20}) ; => [10 20]
 
 ;;self referencing lambda with %self
 (require '[clojure.walk :refer [walk]])
-(clojure.walk/walk (af
-                    (cond
-                      (coll? %) (walk %self identity %)
-                      (number? %) (inc %))) identity [1 2 3 [4]]) ; => [1 2 3 [5]]
-
+(walk (af
+       (cond
+         (coll? %) (walk %self identity %)
+         (number? %) (inc %))) identity [1 2 3 [4]]) ; => [1 2 3 [5]]
 ```
 
 ## aand 
