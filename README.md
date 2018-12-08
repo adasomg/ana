@@ -61,7 +61,7 @@ see [aif](#aif)
 ## aand 
 
 ```clojure
-(aand (+ 30 20) *1 ) ; => (and (+ 30 20) *1)
+(aand (+ 30 20) *1 ) ; => (and (+ 30 20) (+ 30 20))
 (aand 1 2 "third" (aand 33 **3)) ; => (and 1 2 "third" (aand 33 "third"))
 ```
 
