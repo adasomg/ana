@@ -15,7 +15,7 @@ This ensures you can use them __without guilt or hesitation__.
 The library is __VERY MUCH WORK IN PROGRESS__, things will break and change. Note that as of right now the symbols are replaced by copying in the expression it references, not by binding to a common variable. Hence not suitable for using with expressions that cause side-effects or involve a lot of computation. That will be changed soon.
 
 If you have suggestions or existing macros that you think fit here please  submit an issue or a PR.
-Anything that enables succint code and expands to resonable code is fair game. 
+Anything that enables succint code and expands to reasonable code is fair game. 
 
 # require
 ```clojure
