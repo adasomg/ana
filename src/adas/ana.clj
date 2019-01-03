@@ -1,5 +1,5 @@
 ;; adas.ana
-;; Clojure[Script] productivity macros like you've never seen before 
+;; Clojure[Script] productivity macros like you've never seen before
 ;; Github (including more docs) https://github.com/adasomg/ana
 ;; ## general principles ##
 ;; In `acond` `aif`, and `awhen` `%test` or `%t` gets replaced with the test form.
@@ -11,9 +11,10 @@
 
 (ns adas.ana
   (:require
-   [clojure.walk :as walk]
+   [clojure.walk :as walk :refer [macroexpand-all]]
    [clojure.string :as s]
-   [clojure.set :refer [difference]]))
+   [clojure.set :refer [difference intersection]]))
+
 
 (defmacro double-quote [s]
   `(str "\"" ~s "\""))
@@ -68,201 +69,303 @@
 
 (defn core-to-ana [x]
   (case x
-    and 'adas.ana/aand
     cond 'adas.ana/acond
     if 'adas.ana/aif
+    when 'adas.ana/awhen
+    and 'adas.ana/aand
     or 'adas.ana/aor
     false))
 
 (defn get-anaphorizes [x]
   (->> (or (core-to-ana x) x) resolve meta ::anaphorizes))
 
+(defn first-symbol-p [x]
+  (and (seq? x) (symbol? (first x)) (first x)))
+(defn first-symbol= [x sym]
+  (= (first-symbol-p x) sym))
 
-(def aif-anaphorizes #{'%test '%else '%then})
-(defmacro ^{::anaphorizes aif-anaphorizes} aif [& body]
-  (let [replaces (atom {})]
-    (letfn [(walker [[test then else :as form] depth ana-depth x]
-              (let [rexp (re-pattern (qstr "^\\%((t{~(+ 1 ana-depth)})|(e{~(+ 1 ana-depth)}))(est|hen|lse)?"))]
-                (cond
-                  (and (coll? x) (list? x) (symbol? (first x)) (->> x first get-anaphorizes (difference aif-anaphorizes) empty?))
-                  (walk/walk (partial walker form (inc depth) (inc ana-depth)) identity x)
+(defn get-regex [type {:syms [test else then *] :as d}]
+  ;; (pprint d)
+  (re-pattern (str (case type 
+                     aif (qstr "^\\%((((t){~(+ 1 test)})(est)?)|(((e){~(+ 1 else)})(lse)?)|(((t){~(+ 1 then)})(hen)))")
+                     awhen (qstr "^\\%((((t){~(+ 1 test)})(est)?)|(((e){~(+ 1 else)})(lse)?)|(((t){~(+ 1 then)})(hen$)))")
+                     acond (qstr "^\\%((((t){~(+ 1 test)})(est)?))")
+                     aand (qstr "^\\*{~(+ 1 *)}([0-9])$")
+                     aor (qstr "^\\*{~(+ 1 *)}([0-9])$")
+                     (throw (ex-info (qstr "Can't generate regex for ~type") {}))) "(!)?$")))
 
-                  (coll? x) (walk/walk (partial walker form (inc depth) ana-depth) identity x)
 
-                  (not (symbol? x)) x
 
-                  (re-find rexp (name x))
-                  (let [g (gensym)
-                        [_ l _ _  m] (re-find rexp (name x))]
-                    (case m
-                      "est" (swap! replaces assoc g test)
-                      nil (if (= l "t")
-                            (swap! replaces assoc g test)
-                            (swap! replaces assoc g else))
-                      "hen" (swap! replaces assoc g then)
-                      "lse" (swap! replaces assoc g else))
-                    g)
+(def anaphorizes '{aif #{test else then}
+                   awhen #{test}
+                   acond #{test}
+                   aand #{*}})
 
-                  :else x)))]
-      (let [r (loop [body body
-                     old-c nil]
-                (let [new-c (count @replaces)
-                      body (walk/postwalk-replace @replaces body)]
-                  (if (= old-c new-c)
-                    body
-                    (recur (walk/walk (partial walker body 0 0) identity body) new-c))
-                  ))]
-        `(if ~@r)))))
+(def empty-ana-depths '{test 0
+                        else 0
+                        then 0
+                        * 0})
 
-(def awhen-anaphorizes #{'%test '%then})
-(defmacro ^{::anaphorizes awhen-anaphorizes} awhen [& body]
-  (let [replaces (atom {})]
-    (letfn [(walker [[test then else :as form] depth x]
+(defn walk
+  "like clojure.walk/walk but indexed"
+  {:added "1.1"}
+  [inner outer form]
+  (cond
+    (list? form) (outer (apply list (map-indexed inner form)))
+    (instance? clojure.lang.IMapEntry form) (outer (vec (map-indexed inner form)))
+    (seq? form) (outer (doall (map-indexed inner form)))
+    (instance? clojure.lang.IRecord form)
+    (outer (reduce (fn [r x] (conj r (inner x))) form form))
+    (map? form) (outer (into {} (map-indexed #(inner (key (nth (into [] form) %1)) %2) form)))
+    (coll? form) (outer (into (empty form) (map-indexed inner form)))
+    :else (outer form)))
+
+(defn get-path [coll path]
+  (loop [coll coll
+         path path]
+    (if path
+      (let [a (first path)]
+        (recur (cond
+                 (map? coll) (coll a)
+                 (number? a) (nth coll a)
+                 )
+               (next path)))
+      coll)))
+
+(defn bind-sym [x]
+  (nth x 1))
+
+(defn bind-val [x]
+  (nth x 2))
+
+
+(defmacro scond
+  [& [c :as clauses]]
+  (when clauses
+    (cond (first-symbol= c 'adas.ana/bind)
+          (list 'if-let [(bind-sym c) (bind-val c)]
+                (if (next clauses)
+                  (second clauses)
+                  (throw (IllegalArgumentException.
+                          "cond requires an even number of forms")))
+                (cons 'adas.ana/scond (next (next clauses))))
+          :else
+          (list 'if c
+                (if (next clauses)
+                  (second clauses)
+                  (throw (IllegalArgumentException.
+                          "cond requires an even number of forms")))
+                (cons 'adas.ana/scond (next (next clauses)))))))
+
+(defmacro sand
+  ([] true)
+  ([x] (cond (symbol? x) x
+             (seq? x) (nth x 2)
+             :else x))
+  ([x & next]
+   (cond
+     (and (symbol? x) (re-find #"^ANA_BIND_.*" (name x)))
+     `(if ~x (sand ~@next) ~x)
+     :else
+     `(let [~(nth x 1) ~(nth x 2)]
+        (if ~(nth x 1) (sand ~@next) ~(nth x 1))))))
+
+(defmacro sif
+  ([test & [then else :as branches]]
+   (cond
+     (= (first-symbol-p test) 'adas.ana/bind)
+     `(if-let [~(nth test 1) ~(nth test 2)]
+        ~@branches)
+     :else `(if ~test ~@branches))))
+
+(defmacro swhen
+  ([test & then]
+   (cond
+     (= (first-symbol-p test) 'adas.ana/bind)
+     `(when-let [~(nth test 1) ~(nth test 2)]
+        ~@then)
+     :else `(when ~test ~@then))))
+
+(defmacro sor
+  ([] true)
+  ([x] (cond (symbol? x) x
+             (seq? x) (nth x 2)
+             :else x))
+  ([x & next]
+   (cond
+     (and (symbol? x) (re-find #"^ANA_BIND_.*" (name x)))
+     `(if ~x ~x (sand ~@next))
+     :else
+     `(let [~(nth x 1) ~(nth x 2)]
+        (if ~(nth x 1) ~(nth x 1) (sand ~@next))))))
+
+(defn build-next-path [path index x]
+  (cond
+    (coll? x) (conj path index)))
+
+(defmacro cur-path []
+  `(conj ~'path ~'index))
+
+(defmacro acond-clause-index []
+  '(dec (if (= depth 0) index top-index)))
+
+(defmacro anaph-test []
+  '(if copy
+     (swap! replaces assoc g test)
+     (if-let [b (@binds [0])]
+       (swap! replaces assoc g (if (list? b) (second b) b))
+       (do
+         (swap! replaces assoc (gensym) "fake")
+         (swap! binds assoc [0] g)))))
+
+(defn get-walker [type replaces binds]
+  (letfn [(walker [body top-index path [test then else :as form] depth ana-depths index x]
+            ;; (pprint (qmap top-index form path {:binds @binds} x depth))
+            (let [rexp (get-regex type ana-depths)]
               (cond
-                (and (coll? x) (list? x) (symbol? (first x)) (->> x first get-anaphorizes (difference awhen-anaphorizes) empty?))
-                (walk/walk (partial walker form (inc depth)) identity x)
-
-                (coll? x) (walk/walk (partial walker form depth) identity x)
-
-                (not (symbol? x)) x
-
-                (re-find (re-pattern (qstr "^\\%[te]{~(+ 1 depth)}(est|hen)?")) (name x))
-                (let [g (gensym)
-                      [_ m] (re-find (re-pattern (qstr "^\\%[te]{~(+ 1 depth)}(est|hen)?")) (name x))]
-
-                  (case m
-                    "est" (swap! replaces assoc g test)
-                    nil (swap! replaces assoc g test)
-                    "hen" (swap! replaces assoc g then))
-                  g)
-
-                :else x))]
-      (let [r (loop [body body
-                     old-c nil]
-                (let [new-c (count @replaces)
-                      body (walk/postwalk-replace @replaces body)]
-                  (if (= old-c new-c)
-                    body
-                    (recur (walk/walk (partial walker body 0) identity body) new-c))
-                  ))]
-        `(when ~@r)))))
-
-
-
-(def acond-anaphorizes #{'%test})
-(defmacro ^{::anaphorizes acond-anaphorizes} acond [& body]
-  (let [replaces (atom {})]
-    (letfn [(walker [form [test then :as cond-form] depth ana-depth x]
-              (cond
-                (and (coll? x) (list? x) (symbol? (first x)) (->> x first get-anaphorizes (difference acond-anaphorizes) empty?))
-                (walk/walk (partial walker form (if (= depth 0)
-                                                  x
-                                                  cond-form) (inc depth) (inc ana-depth)) identity x)
-
-                (coll? x) (walk/walk (partial walker form (if (= depth 0)
-                                                            x
-                                                            cond-form) (inc depth) ana-depth) identity x)
-
-                (not (symbol? x)) x
-
-                (re-find (re-pattern (qstr "^\\%[te]{~(+ 1 ana-depth)}(est)?")) (name x))
-                (let [g (gensym)
-                      [_ m] (re-find (re-pattern (qstr "^\\%[te]{~(+ 1 ana-depth)}(est)?")) (name x))]
-                  (case m
-                    nil (swap! replaces assoc g test)
-                    "est" (swap! replaces assoc g test))
-                  g)
-                :else x))]
-      (let [r (loop [body (partition 2 body)
-                     old-c nil]
-                (let [new-c (count @replaces)
-                      body (walk/postwalk-replace @replaces body)]
-                  (if (= old-c new-c)
-                    body
-                    (recur (walk/walk (partial walker body nil 0 0) identity body) new-c))
-                  ))
-            r (apply concat r)]
-        `(cond ~@r)))))
-
-
-(def aand-anaphorizes #{'*})
-(defmacro ^{::anaphorizes aand-anaphorizes} aand [& body]
-  (let [replaces (atom {})]
-    (letfn [(walker [[a b c d e f g :as form] nth-pass depth ana-depth x]
-              (let [sym (when (symbol? x) (name x))]
+                (symbol? (@binds (cur-path)))
+                (do
+                  (swap! replaces assoc (gensym) "fake")
+                  
+                  (let [ret `(bind ~(@binds (cur-path)) ~(walk (partial walker body (if (= 0 depth) index top-index) (build-next-path path index x) form (inc depth) ana-depths) identity x))]
+                    (swap! binds assoc (cur-path) (list 'already-bound (@binds (cur-path))))
+                    ret))
                 
-                (cond
+                (= (first-symbol-p x) 'adas.ana/bind)
+                (cond (coll? (nth x 2))
+                      `(bind ~(nth x 1) ~(walk (partial walker body (if (= 0 depth) index top-index) (build-next-path path index (nth x 2)) form (inc depth) ana-depths) identity (nth x 2)))
 
-                  (and (coll? x)  (symbol? (first x)) (= (first x) 'adas.ana/nth-form))
-                  (do
-                    (swap! replaces assoc (gensym) "fake")
-                    (nth form (second x)))
+                      :else x)
 
-                  (and (coll? x) (list? x) (symbol? (first x)) (->> x first get-anaphorizes (difference aand-anaphorizes) empty?))
-                  (walk/walk (partial walker form nth-pass (inc depth) (inc ana-depth)) identity x)
+                (and (or (= type 'aand)
+                         (= type 'aor))  (= (first-symbol-p x) 'adas.ana/nth-form))
+                (do
+                  (swap! replaces assoc (gensym) "fake")
+                  (@binds (second x))
+                  ;; (nth body (second x))
+                  )
+
+                (and (= depth 0)
+                     (not (= (first-symbol-p x) 'adas.ana/bind))
+                     (not (= (first-symbol-p x) 'adas.ana/nth-form))
+
+                     (or (not (symbol? x))
+                         (and (not (re-find rexp (name x)))
+                              (not (re-find #"^ANA_BIND_.*" (name x)))))
+                     (and (or (= type 'aand)
+                              (= type 'aor))))
+                (let [g (gensym "ANA_BIND_")]
+                  (swap! binds assoc index g)
+                  (swap! replaces assoc (gensym) "fake")
+                  (list 'adas.ana/bind g (cond (coll? x)
+                                               (walk (partial walker body
+                                                              (if (= 0 depth) index top-index)
+                                                              (build-next-path path index x) form (inc depth) ana-depths) identity x)
+                                               :else x)))
+
+                (first-symbol-p x)
+                (walk (partial walker body (if (= 0 depth) index top-index) (build-next-path path index x) form (inc depth)
+                               (reduce (fn [a b] (update a b #(or (and (number? %) (inc %)) 1))) ana-depths
+                                       (->> x first get-anaphorizes (intersection (anaphorizes type))))) identity x)
 
 
-                  (coll? x) (walk/walk (partial walker form nth-pass (inc depth) ana-depth) identity x)
 
+                (coll? x)
+                (walk (partial walker body (if (= 0 depth) index top-index) (build-next-path path index x) form (inc depth) ana-depths) identity x)
 
-                  (not (symbol? x)) x
-                  (re-find (re-pattern (qstr "^\\*{~(+ 1 ana-depth)}([0-9])")) sym) (let [n (dec (read-string (second (re-find #"\*([0-9]{1,2})" sym))))
-                                                                                          g (gensym)]
-                                                                                      (swap! replaces assoc g `(nth-form ~n))
-                                                                                      g)
-                  :else x
-                  )))]
-      (let [r (loop [body body
-                     old-cr nil
-                     nth-pass 0]
-                (let [new-cr (count @replaces)
-                      body (walk/postwalk-replace @replaces body)]
-                  (if (= old-cr new-cr)
-                    body
-                    (recur (walk/walk (partial walker body nth-pass 0 0) identity body) new-cr (inc nth-pass)))
+                (not (symbol? x)) x
+
+                (re-find rexp (name x))
+                (let [[m n _ _ l  :as res] (re-find rexp (name x))
+                      copy (last res)
+                      g (if copy (gensym "ANA_COPY_") (gensym "ANA_BIND_"))]
+                  (and (cond
+                         (nil? res) x
+                         (or (= type 'aand)
+                             (= type 'aor)) (swap! replaces assoc g `(nth-form ~(dec (read-string n))))
+                         (or (re-find #"est!?" m)
+                             (= l "t")) (if (= type 'acond)
+                                          (if copy
+                                            (swap! replaces assoc g (nth body (acond-clause-index)))
+                                            (do
+                                              (swap! replaces assoc (gensym) "fake")
+                                              (swap! binds assoc [(acond-clause-index)] g)))
+                                          (anaph-test))
+                         (re-find #"hen!?" m) (swap! replaces assoc g then)
+                         (re-find #"lse!?" m) (swap! replaces assoc g else)
+                         :else (swap! replaces assoc g else))
+                       g))
+                :else x)))]
+    walker))
+
+(defmacro defanaphora [aname oname]
+  `(defmacro ~(with-meta aname `{::anaphorizes (anaphorizes '~aname)}) [& body#]
+     (let [replaces# (atom {})
+           binds# (atom {})
+           r# (loop [body-i# body#
+                     old-c# nil]
+                (let [new-c# (count @replaces#)
+                      body-ii# (walk/postwalk-replace @replaces# body-i#)]
+                  (if (= old-c# new-c#)
+                    body-ii#
+                    (recur (walk (partial (get-walker '~aname replaces# binds#) body-ii# 0 [] body-ii# 0 empty-ana-depths) identity body-ii#) new-c#))
                   ))]
-        `(and ~@r)))))
+       `(~'~oname ~@r#))))
 
-(defmacro aor [& body]
-  (conj (rest (macroexpand-1 `(aand ~@body))) 'or))
+(acond 9 (+ 9 %test!))
+
+(defanaphora aand adas.ana/sand)
+(defanaphora aor adas.ana/sor)
+(defanaphora aif adas.ana/sif)
+(defanaphora awhen adas.ana/swhen)
+(defanaphora acond adas.ana/scond)
 
 (defn no-stop? [x]
-  (and (coll? x)
+  (and (seq? x)
        (not (= (first x) 'af))))
 
 (defmacro af [& body]
   (let [replaces (atom {})
-        args [(gensym) (gensym) (gensym) (gensym)]
+        args [(gensym) (gensym) (gensym) (gensym) :as 'af-args]
         rest (gensym)
-        self (gensym)]
+        self (gensym)
+        af-args (gensym)]
     (letfn [(walker [form x]
-              (cond
-                (no-stop? x) (walk/walk (partial walker form) identity x)
-                (= '% x) (args 0)
-                (= '%1 x) (args 0)
-                (= '%2 x) (args 1)
-                (= '%3 x) (args 2)
-                (= '%self x) self
+                                        ;(pprint (qmap form x))
+              (acond
+               (no-stop? x) (walk/walk (partial walker form) identity x)
+               (= '% x) (args 0)
+               (= '%1 x) (args 0)
+               (= '%2 x) (args 1)
+               (= '%3 x) (args 2)
+               (= '%4 x) (args 3)
+               (= '%5 x) (args 4)
+               (= '%6 x) (args 5)
+               (= '%7 x) (args 6)
+               (= '%8 x) (args 7)
+               (= '%9 x) (args 8)
+               (= '%self x) self
+               (= '%args x) 'af-args
 
-                (and (symbol? x)
-                     (or (and (resolve x)
-                              (= (.-ns (resolve x)) (the-ns 'clojure.core)))
-                         (= x 'if)))
-                (aif (core-to-ana x)
-                     (do
-                       (swap! replaces assoc (gensym) "fake")
-                       %test)
-                     x)
+               (and (symbol? x)
+                    (or (and (resolve x)
+                             (= (.-ns (resolve x)) (the-ns 'clojure.core)))
+                        (= x 'if)))
+               (aif (core-to-ana x)
+                    (do
+                      (swap! replaces assoc (gensym) "fake")
+                      %test)
+                    x)
 
-                (and (symbol? x)
-                     (re-find #"^%([0-9]|:)(.+)" (name x))) (let [s (gensym)
-                                                                  [_ num key] (re-find #"^%([0-9])?(.+)" (name x))
-                                                                  num (if num (read-string num) 1)
-                                                                  key (read-string key)]
-                                                              (if (keyword? key)
-                                                                (list key (args (dec num)))
-                                                                (list (args (dec num)) key)))
-                :else x))]
+               (and (symbol? x)
+                    (re-find #"^%([0-9])?(:.+)?$" (name x))) (let [s (gensym)
+                                                                   [_ n key] %test
+                                                                   n (if (and n (not (= ":" n))) (read-string n) 1)
+                                                                   key (read-string key)]
+                                                               (if (keyword? key)
+                                                                 (list key (args (dec n)))
+                                                                 (list (args (dec n)) key)))
+               :else x))]
       (let [r (loop [body body ;; (walk/macroexpand-all body)
                      old-cr nil]
                 (let [new-cr (count @replaces)
@@ -273,6 +376,7 @@
                   ))]
         `(fn* ~self ([& ~rest] (let [~args ~rest]
                                  ~@r)))))))
+
 
 
 ;; WIP
@@ -315,53 +419,3 @@
 ;;         (recur threaded nx (first forms)))
 ;;       (walk/postwalk-replace '{speciallet clojure.core/let
 ;;                                speciallet-2 clojure.core/let } x))))
-
-
-
-
-;; (comment
-;;   ((af (if " TTEST "
-;;          (if " TEST " (and (str  %ttest %test %eelse %else)
-;;                            (str *1 " whatever ")
-;;                            (and (str " foo " **2 " bar ")))
-;;              " ELSE ")
-;;          " EELSE ")))
-;;   (awhen 100 (+ 20 ( 999999999 %test)))
-
-;;   (let [a 10
-;;         b 9
-;;         c "lol"]
-;;     (qmap a b (str c "hehe") {:d (qstr "console.log(~~c)")}))
-
-;;   ((af (aand 30 [%:lol %:omg])) {:lol 20 :omg 99})
-;;   (aand 9 43 (aand **1 **2 (+ **1 **1)))
-
-;;   (def test-fn (af (if " TTEST "
-;;                      (if " TEST " (and (str  %ttest %test %eelse %else)
-;;                                        (str *1 " whatever ")
-;;                                        (and (str " foo " **2 " bar " ((af (str %:test (str %))) {:test " test "})))
-;;                                        {:result *3})
-;;                          " ELSE ")
-;;                      " EELSE ")))
-
-;;   (time (test-fn))
-
-;;   (walk/macroexpand-all '(af (if " TTEST "
-;;                                (if " TEST " (and (str  %ttest %test %eelse %else)
-;;                                                  (str *1 " whatever ")
-;;                                                  (and (str " foo " **2 " bar ")))
-;;                                    " ELSE ")
-;;                                " EELSE ")))
-
-;;   (time (#(if-let [x " TTEST "]
-;;             (if-let [y " TEST " ] (and (str x y %eelse %else)
-;;                                        (str *1 " whatever ")
-;;                                        (and (str " foo " **2 " bar ")))
-;;                     " ELSE ")
-;;             " EELSE ")))
-
-;;   (= 'adas.ana/nth-form 'nth-form)
-
-;;   (walk/macroexpand-all '(af % (cond false %test 90 (and 3))))
-
-;;   (aif 9 %test %test))
