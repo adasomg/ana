@@ -137,7 +137,6 @@
 (defn bind-val [x]
   (nth x 2))
 
-
 (defmacro scond
   [& [c :as clauses]]
   (when clauses
