@@ -12,7 +12,7 @@ The "quick" macros are simply other general purpose macros which aren't anaphori
 All the macros expand to code very similar (or identitcal) to that which you'd write by hand.
 This ensures you can use them __without guilt or hesitation__.
 
-The library is __VERY MUCH WORK IN PROGRESS__, things will break and change. Note that as of right now the symbols are replaced by copying in the expression it references, not by binding to a common variable. Hence not suitable for using with expressions that cause side-effects or involve a lot of computation. That will be changed soon.
+The library is __VERY MUCH WORK IN PROGRESS__, things will break and change. ~~Note that as of right now the symbols are replaced by copying in the expression it references, not by binding to a common variable. Hence not suitable for using with expressions that cause side-effects or involve a lot of computation. That will be changed soon~~ Fixed since `"0.1.0"`, most special symbols bind by default where it makes sense now. Suffixing with `!` (e.g. `%test!`) will clone the target expression. More docs coming soon.
 
 If you have suggestions or existing macros that you think fit here please  submit an issue or a PR.
 Anything that enables succint code and expands to reasonable code is fair game. 
