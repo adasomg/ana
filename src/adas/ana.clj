@@ -66,7 +66,7 @@
              (symbol? %2) (assoc %1 (keyword (name %2)) %2)
              (map? %2) (merge %1 %2)) {}  keys))
 
-(defn core-to-ana [x]
+(defn- core-to-ana [x]
   (case x
     cond 'adas.ana/acond
     if 'adas.ana/aif
@@ -75,15 +75,16 @@
     or 'adas.ana/aor
     false))
 
-(defn get-anaphorizes [x]
+(defn- get-anaphorizes [x]
   (->> (or (core-to-ana x) x) resolve meta ::anaphorizes))
 
-(defn first-symbol-p [x]
+(defn- first-symbol-p [x]
   (and (seq? x) (symbol? (first x)) (first x)))
-(defn first-symbol= [x sym]
+
+(defn- first-symbol= [x sym]
   (= (first-symbol-p x) sym))
 
-(defn get-regex [type {:syms [test else then *] :as d}]
+(defn- get-regex [type {:syms [test else then *] :as d}]
   ;; (pprint d)
   (re-pattern (str (case type 
                      aif (qstr "^\\%((((t){~(+ 1 test)})(est)?)|(((e){~(+ 1 else)})(lse)?)|(((t){~(+ 1 then)})(hen)))")
@@ -105,7 +106,7 @@
                         then 0
                         * 0})
 
-(defn walk
+(defn- walk
   "like clojure.walk/walk but indexed"
   {:added "1.1"}
   [inner outer form]
@@ -119,7 +120,7 @@
     (coll? form) (outer (into (empty form) (map-indexed inner form)))
     :else (outer form)))
 
-(defn get-path [coll path]
+(defn- get-path [coll path]
   (loop [coll coll
          path path]
     (if path
@@ -131,10 +132,10 @@
                (next path)))
       coll)))
 
-(defn bind-sym [x]
+(defn- bind-sym [x]
   (nth x 1))
 
-(defn bind-val [x]
+(defn- bind-val [x]
   (nth x 2))
 
 (defmacro scond
@@ -197,7 +198,7 @@
      `(let [~(nth x 1) ~(nth x 2)]
         (if ~(nth x 1) ~(nth x 1) (sand ~@next))))))
 
-(defn build-next-path [path index x]
+(defn- build-next-path [path index x]
   (cond
     (coll? x) (conj path index)))
 
@@ -219,7 +220,7 @@
          (ensure-recur)
          (swap! binds assoc [0] g)))))
 
-(defn get-walker [type replaces binds then-c else-c uniq]
+(defn- get-walker [type replaces binds then-c else-c uniq]
   (letfn [(walker [body top-index path [test then else :as form] depth ana-depths index x]
             ;; (pprint (qmap (deref then-c ) (deref else-c)))
             (let [rexp (get-regex type ana-depths)]
@@ -351,7 +352,7 @@
 (defanaphora awhen adas.ana/swhen)
 (defanaphora acond adas.ana/scond)
 
-(defn no-stop? [x]
+(defn- no-stop? [x]
   (and (seq? x)
        (not (= (first x) 'af))))
 
