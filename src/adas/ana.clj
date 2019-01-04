@@ -9,8 +9,6 @@
 ;; In the `aand` and `aor` macros you can reference arguments by using a symbol of form `*<num>` where num is the 1-index of the argument.
 ;; Previous levels are accessed by doubling the `*` character. So the second test form of an `aand` can by accessed with `*2` and the third argument of the previous `aand` would be `**3`
 
-;; [] TODO acond broken for double+ %test
-
 (ns adas.ana
   (:require
    [clojure.walk :as walk :refer [macroexpand-all]]
