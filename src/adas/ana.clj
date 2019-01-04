@@ -15,7 +15,6 @@
    [clojure.string :as s]
    [clojure.set :refer [difference intersection]]))
 
-
 (defmacro double-quote [s]
   `(str "\"" ~s "\""))
 
@@ -209,24 +208,46 @@
 (defmacro acond-clause-index []
   '(dec (if (= depth 0) index top-index)))
 
+(defmacro ensure-recur []
+  '(swap! replaces assoc (gensym) "fake"))
+
 (defmacro anaph-test []
   '(if copy
      (swap! replaces assoc g test)
      (if-let [b (@binds [0])]
        (swap! replaces assoc g (if (list? b) (second b) b))
        (do
-         (swap! replaces assoc (gensym) "fake")
+         (ensure-recur)
          (swap! binds assoc [0] g)))))
 
-(defn get-walker [type replaces binds]
+(defn get-walker [type replaces binds then-c else-c uniq]
   (letfn [(walker [body top-index path [test then else :as form] depth ana-depths index x]
-            ;; (pprint (qmap top-index form path {:binds @binds} x depth))
+            ;; (pprint (qmap (deref then-c ) (deref else-c)))
             (let [rexp (get-regex type ana-depths)]
               (cond
+
+                (and @else-c @then-c)
+                (throw (ex-info "Cannot use both %then and %else" {}))
+                
+                (and (= (cur-path) [2])
+                     (= @then-c :first))
+                (do
+                  (reset! then-c :done)
+                  (ensure-recur)
+                  `(let [~uniq ~then]
+                     ~else))
+
+                (and (= (cur-path) [1])
+                     (= @else-c :first))
+                (do
+                  (reset! else-c :done)
+                  (ensure-recur)
+                  `(let [~uniq ~else]
+                     ~then))
+                
                 (symbol? (@binds (cur-path)))
                 (do
-                  (swap! replaces assoc (gensym) "fake")
-                  
+                  (ensure-recur)
                   (let [ret `(bind ~(@binds (cur-path)) ~(walk (partial walker body (if (= 0 depth) index top-index) (build-next-path path index x) form (inc depth) ana-depths) identity x))]
                     (swap! binds assoc (cur-path) (list 'already-bound (@binds (cur-path))))
                     ret))
@@ -240,7 +261,7 @@
                 (and (or (= type 'aand)
                          (= type 'aor))  (= (first-symbol-p x) 'adas.ana/nth-form))
                 (do
-                  (swap! replaces assoc (gensym) "fake")
+                  (ensure-recur)
                   (@binds (second x))
                   ;; (nth body (second x))
                   )
@@ -256,7 +277,7 @@
                               (= type 'aor))))
                 (let [g (gensym "ANA_BIND_")]
                   (swap! binds assoc index g)
-                  (swap! replaces assoc (gensym) "fake")
+                  (ensure-recur)
                   (list 'adas.ana/bind g (cond (coll? x)
                                                (walk (partial walker body
                                                               (if (= 0 depth) index top-index)
@@ -288,11 +309,21 @@
                                           (if copy
                                             (swap! replaces assoc g (nth body (acond-clause-index)))
                                             (do
-                                              (swap! replaces assoc (gensym) "fake")
+                                              (ensure-recur)
                                               (swap! binds assoc [(acond-clause-index)] g)))
                                           (anaph-test))
-                         (re-find #"hen!?" m) (swap! replaces assoc g then)
-                         (re-find #"lse!?" m) (swap! replaces assoc g else)
+                         (re-find #"hen!?" m) (if copy
+                                                (swap! replaces assoc g then)
+                                                (do (when-not (or (= :done @then-c)
+                                                                  (= :first @then-c))
+                                                      (reset! then-c :first))
+                                                    (swap! replaces assoc g uniq)))
+                         (re-find #"lse!?" m) (if copy
+                                                (swap! replaces assoc g else)
+                                                (do (when-not (or (= :done @else-c)
+                                                                  (= :first @else-c))
+                                                      (reset! else-c :first))
+                                                    (swap! replaces assoc g uniq)))
                          :else (swap! replaces assoc g else))
                        g))
                 :else x)))]
@@ -301,6 +332,9 @@
 (defmacro defanaphora [aname oname]
   `(defmacro ~(with-meta aname `{::anaphorizes (anaphorizes '~aname)}) [& body#]
      (let [replaces# (atom {})
+           then-c# (atom nil)
+           else-c# (atom nil)
+           uniq# (gensym)
            binds# (atom {})
            r# (loop [body-i# body#
                      old-c# nil]
@@ -308,11 +342,9 @@
                       body-ii# (walk/postwalk-replace @replaces# body-i#)]
                   (if (= old-c# new-c#)
                     body-ii#
-                    (recur (walk (partial (get-walker '~aname replaces# binds#) body-ii# 0 [] body-ii# 0 empty-ana-depths) identity body-ii#) new-c#))
+                    (recur (walk (partial (get-walker '~aname replaces# binds# then-c# else-c# uniq#) body-ii# 0 [] body-ii# 0 empty-ana-depths) identity body-ii#) new-c#))
                   ))]
        `(~'~oname ~@r#))))
-
-(acond 9 (+ 9 %test!))
 
 (defanaphora aand adas.ana/sand)
 (defanaphora aor adas.ana/sor)
@@ -353,7 +385,7 @@
                         (= x 'if)))
                (aif (core-to-ana x)
                     (do
-                      (swap! replaces assoc (gensym) "fake")
+                      (ensure-recur)
                       %test)
                     x)
 
@@ -376,7 +408,6 @@
                   ))]
         `(fn* ~self ([& ~rest] (let [~args ~rest]
                                  ~@r)))))))
-
 
 
 ;; WIP

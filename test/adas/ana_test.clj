@@ -1,25 +1,7 @@
 (ns adas.ana-test
-  (:require [adas.ana :as ana :refer [af awhen aif acond aor sand sor aand]]
-            [clojure.test :as t :refer [is deftest]]
-            [clojure.walk :refer [macroexpand-all] :as walk]))
-
-(defn pretty-expand [form]
-  (let [r (atom {})
-        c (atom 0)
-        form (macroexpand-all form)]
-    (letfn
-        [(walker [a]
-           (cond (and
-                  (symbol? a)
-                  (re-find #"((^G__)|(^ANA_BIND_)|(^ANA_COPY_)|(^temp__)|(^test_))"
-                           (name a)))
-                 (if (not (@r a)) (let [g (symbol (str "PRETTY_" (swap! c inc)))]
-                                    (do (swap! r assoc a g)
-                                        g)) a)
-                 
-                 (coll? a) (walk/walk walker identity a)
-                 :else a))](walk/walk walker identity form)
-        (walk/postwalk-replace @r form))))
+  (:require [adas.ana :as ana :refer [af awhen aif acond aor sand sif sor aand]]
+            [clojure.test :as t :refer [is deftest with-test]]
+            [clojure.walk :as walk]))
 
 (deftest basic
   (is
@@ -85,19 +67,52 @@
                          (acond (swap! a #(+ 2 %)) %t!)) %test!  %t!
              @a)))))))
 
+
+
+(deftest side-effects-then-else
+  (is
+   (=
+    15
+    (let [a (atom 0)]
+      (aif 1 (do %else %else %else %t %test %else! %else! @a) (swap! a #(+ 5 %))))
+
+    (let [a (atom 0)]
+      (aif false (swap! a #(+ 5 %)) (do %then %then %then %t! %test! %then! %then! @a))))))
+
+;; EXPANSIONS
+(defn pretty-expand [form]
+  (let [r (atom {})
+        c (atom 0)
+        form (walk/macroexpand-all form)]
+    (letfn
+        [(walker [a]
+           (cond (and
+                  (symbol? a)
+                  (re-find #"((^G__)|(^ANA_BIND_)|(^ANA_COPY_)|(^temp__)|(^test_))"
+                           (name a)))
+                 (if (not (@r a)) (let [g (symbol (str "PRETTY_" (swap! c inc)))]
+                                    (do (swap! r assoc a g)
+                                        g)) a)
+                 
+                 (coll? a) (walk/walk walker identity a)
+                 :else a))](walk/walk walker identity form)
+        (walk/postwalk-replace @r form))))
+
 (deftest when-expansion
-  (is (= (pretty-expand '(awhen 9 %test))
+  (is (= (pretty-expand '(adas.ana/awhen 9 %test))
          (pretty-expand '(when-let [test_1 9] test_1)))))
 
 (deftest if-expansion
-  (is (= (pretty-expand '(aif false 2000 %test))
+  (is (= (pretty-expand '(adas.ana/aif false 2000 %test))
          (pretty-expand '(if-let [test_1 false] 2000 test_1)))))
 
 (deftest if-expansion2
-  (is (= (pretty-expand '(aif false 2000 %test!))
+  (is (= (pretty-expand '(adas.ana/aif false 2000 %test!))
          (pretty-expand '(if false  2000 false)))))
 
 (deftest acond-expansion
-  (is (= (pretty-expand '(acond false 2000 :CLAUSE %test!))
+  (is (= (pretty-expand '(adas.ana/acond false 2000 :CLAUSE %test!))
          (pretty-expand '(cond false  2000 :CLAUSE :CLAUSE)))))
+
+
 
