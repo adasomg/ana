@@ -9,6 +9,8 @@
 ;; In the `aand` and `aor` macros you can reference arguments by using a symbol of form `*<num>` where num is the 1-index of the argument.
 ;; Previous levels are accessed by doubling the `*` character. So the second test form of an `aand` can by accessed with `*2` and the third argument of the previous `aand` would be `**3`
 
+;; [] TODO acond broken for double+ %test
+
 (ns adas.ana
   (:require
    [clojure.walk :as walk :refer [macroexpand-all]]
@@ -98,7 +100,8 @@
 (def anaphorizes '{aif #{test else then}
                    awhen #{test}
                    acond #{test}
-                   aand #{*}})
+                   aand #{*}
+                   aor #{*}})
 
 (def empty-ana-depths '{test 0
                         else 0
@@ -253,7 +256,9 @@
                 
                 (= (first-symbol-p x) 'adas.ana/bind)
                 (cond (coll? (nth x 2))
-                      `(bind ~(nth x 1) ~(walk (partial walker body (if (= 0 depth) index top-index) (build-next-path path index (nth x 2)) form (inc depth) ana-depths) identity (nth x 2)))
+                      `(bind ~(nth x 1) ~(walk (partial walker body (if (= 0 depth) index top-index) (build-next-path path index (nth x 2)) form (inc depth)
+                                                        (reduce (fn [a b] (update a b #(or (and (number? %) (inc %)) 1))) ana-depths
+                                                                (->> (nth x 2) first get-anaphorizes (intersection (anaphorizes type))))) identity (nth x 2)))
 
                       :else x)
 
@@ -280,8 +285,9 @@
                   (list 'adas.ana/bind g (cond (coll? x)
                                                (walk (partial walker body
                                                               (if (= 0 depth) index top-index)
-                                                              (build-next-path path index x) form (inc depth) (reduce (fn [a b] (update a b #(or (and (number? %) (inc %)) 1))) ana-depths
-                                                                                                                      (->> x first get-anaphorizes (intersection (anaphorizes type))))) identity x)
+                                                              (build-next-path path index x) form (inc depth)
+                                                              (reduce (fn [a b] (update a b #(or (and (number? %) (inc %)) 1))) ana-depths
+                                                                      (->> x first get-anaphorizes (intersection (anaphorizes type))))) identity x)
                                                :else x)))
 
                 (first-symbol-p x)
@@ -300,38 +306,38 @@
                 (let [[m n _ _ l  :as res] (re-find rexp (name x))
                       copy (last res)
                       g (if copy (gensym "ANA_COPY_") (gensym "ANA_BIND_"))]
-                  (and (cond
-                         (nil? res) x
-                         (or (= type 'aand)
-                             (= type 'aor)) (let [i (read-string n)]
-                                              (swap! replaces assoc g `(nth-form ~(if (> i 0) (dec i) (+ (first (cur-path)) i)))))
-                         (or (re-find #"est!?" m)
-                             (= l "t")) (if (= type 'acond)
-                                          (if copy
-                                            (swap! replaces assoc g (nth body (acond-clause-index)))
-                                            (do
-                                              (ensure-recur)
-                                              (swap! binds assoc [(acond-clause-index)] g)))
-                                          (anaph-test))
-                         (re-find #"hen!?" m) (if copy
-                                                (swap! replaces assoc g then)
-                                                (do (when-not (or (= :done @then-c)
-                                                                  (= :first @then-c))
-                                                      (reset! then-c :first))
-                                                    (swap! replaces assoc g uniq)))
-                         (re-find #"lse!?" m) (if copy
-                                                (swap! replaces assoc g else)
-                                                (do (when-not (or (= :done @else-c)
-                                                                  (= :first @else-c))
-                                                      (reset! else-c :first))
-                                                    (swap! replaces assoc g uniq)))
-                         :else (swap! replaces assoc g else))
-                       g))
+                  (let [res (cond
+                              (nil? res) x
+                              (or (= type 'aand)
+                                  (= type 'aor)) (let [i (read-string n)]
+                                                   (swap! replaces assoc g `(nth-form ~(if (> i 0) (dec i) (+ (first (cur-path)) i)))))
+                              (or (re-find #"est!?" m)
+                                  (= l "t")) (if (= type 'acond)
+                                               (if copy
+                                                 (swap! replaces assoc g (nth body (acond-clause-index)))
+                                                 (do
+                                                   (ensure-recur)
+                                                   (if (@binds [(acond-clause-index)])
+                                                     :condbind
+                                                     (swap! binds assoc [(acond-clause-index)] g))))
+                                               (anaph-test))
+                              (re-find #"hen!?" m) (if copy
+                                                     (swap! replaces assoc g then)
+                                                     (do (when-not (or (= :done @then-c)
+                                                                       (= :first @then-c))
+                                                           (reset! then-c :first))
+                                                         (swap! replaces assoc g uniq)))
+                              (re-find #"lse!?" m) (if copy
+                                                     (swap! replaces assoc g else)
+                                                     (do (when-not (or (= :done @else-c)
+                                                                       (= :first @else-c))
+                                                           (reset! else-c :first))
+                                                         (swap! replaces assoc g uniq)))
+                              :else (swap! replaces assoc g else))]
+                    (cond (= :condbind res) (@binds [(acond-clause-index)])
+                          :else g)))
                 :else x)))]
     walker))
-
-
-
 
 (defmacro defanaphora [aname oname]
   `(defmacro ~(with-meta aname `{::anaphorizes (anaphorizes '~aname)}) [& body#]
