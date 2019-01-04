@@ -19,6 +19,7 @@
   `(str "\"" ~s "\""))
 
 (def terminators #{\space \. \/ \' \) \] \; \: \,})
+
 (defmacro qstr [s]
   (let [pos (volatile! 0)
         start (volatile! nil)
@@ -90,11 +91,9 @@
                      aif (qstr "^\\%((((t){~(+ 1 test)})(est)?)|(((e){~(+ 1 else)})(lse)?)|(((t){~(+ 1 then)})(hen)))")
                      awhen (qstr "^\\%((((t){~(+ 1 test)})(est)?)|(((e){~(+ 1 else)})(lse)?)|(((t){~(+ 1 then)})(hen$)))")
                      acond (qstr "^\\%((((t){~(+ 1 test)})(est)?))")
-                     aand (qstr "^\\*{~(+ 1 *)}([0-9])$")
-                     aor (qstr "^\\*{~(+ 1 *)}([0-9])$")
+                     aand (qstr "^\\*{~(+ 1 *)}(-?[0-9])$")
+                     aor (qstr "^\\*{~(+ 1 *)}(-?[0-9])$")
                      (throw (ex-info (qstr "Can't generate regex for ~type") {}))) "(!)?$")))
-
-
 
 (def anaphorizes '{aif #{test else then}
                    awhen #{test}
@@ -222,7 +221,7 @@
 
 (defn- get-walker [type replaces binds then-c else-c uniq]
   (letfn [(walker [body top-index path [test then else :as form] depth ana-depths index x]
-            ;; (pprint (qmap (deref then-c ) (deref else-c)))
+            ;; (pprint (qmap x ana-depths))
             (let [rexp (get-regex type ana-depths)]
               (cond
 
@@ -281,7 +280,8 @@
                   (list 'adas.ana/bind g (cond (coll? x)
                                                (walk (partial walker body
                                                               (if (= 0 depth) index top-index)
-                                                              (build-next-path path index x) form (inc depth) ana-depths) identity x)
+                                                              (build-next-path path index x) form (inc depth) (reduce (fn [a b] (update a b #(or (and (number? %) (inc %)) 1))) ana-depths
+                                                                                                                      (->> x first get-anaphorizes (intersection (anaphorizes type))))) identity x)
                                                :else x)))
 
                 (first-symbol-p x)
@@ -303,7 +303,8 @@
                   (and (cond
                          (nil? res) x
                          (or (= type 'aand)
-                             (= type 'aor)) (swap! replaces assoc g `(nth-form ~(dec (read-string n))))
+                             (= type 'aor)) (let [i (read-string n)]
+                                              (swap! replaces assoc g `(nth-form ~(if (> i 0) (dec i) (+ (first (cur-path)) i)))))
                          (or (re-find #"est!?" m)
                              (= l "t")) (if (= type 'acond)
                                           (if copy
@@ -328,6 +329,9 @@
                        g))
                 :else x)))]
     walker))
+
+
+
 
 (defmacro defanaphora [aname oname]
   `(defmacro ~(with-meta aname `{::anaphorizes (anaphorizes '~aname)}) [& body#]
@@ -408,7 +412,6 @@
                   ))]
         `(fn* ~self ([& ~rest] (let [~args ~rest]
                                  ~@r)))))))
-
 
 ;; WIP
 ;; (defmacro a->>
