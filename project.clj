@@ -1,4 +1,4 @@
-(defproject adas/ana "0.1.3"
+(defproject adas/ana "0.1.4"
   :description "Clojure[Script] macros for productivity like you've never seen before"
   :url "http://github.com/adasomg/ana"
   :dependencies [[org.clojure/clojure "1.8.0"]]

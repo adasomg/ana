@@ -77,7 +77,9 @@
     false))
 
 (defn- get-anaphorizes [x]
-  (->> (or (core-to-ana x) x) resolve meta ::anaphorizes))
+  (cond (symbol? x)
+        (->> (or (core-to-ana x) x) resolve meta ::anaphorizes)
+        :else nil))
 
 (defn- first-symbol-p [x]
   (and (seq? x) (symbol? (first x)) (first x)))
@@ -360,10 +362,6 @@
 (defanaphora awhen adas.ana/swhen)
 (defanaphora acond adas.ana/scond)
 
-(defn- no-stop? [x]
-  (and (seq? x)
-       (not (= (first x) 'af))))
-
 (defmacro af [& body]
   (let [replaces (atom {})
         args [(gensym) (gensym) (gensym) (gensym) :as 'af-args]
@@ -373,7 +371,9 @@
     (letfn [(walker [form x]
                                         ;(pprint (qmap form x))
               (acond
-               (no-stop? x) (walk/walk (partial walker form) identity x)
+               (and (coll? x) (not (first-symbol-p 'af)))
+               (walk/walk (partial walker form) identity x)
+               
                (= '% x) (args 0)
                (= '%1 x) (args 0)
                (= '%2 x) (args 1)

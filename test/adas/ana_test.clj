@@ -60,7 +60,10 @@
                                    ))))
             false [%t %t %t %t! %tt %tt! (awhen %tt %ttt!)]))
     (and 20 (+ 10 20))
-    ((af (and 20 (+ 10 *1)))))))
+    ((af (and 20 (+ 10 *1))))
+    (aand 30
+          (inc *-1) (inc *-1) (inc *-1)
+          (dec *-1) (dec *-1) (dec *-1)))))
 
 (deftest crazy
   (is
